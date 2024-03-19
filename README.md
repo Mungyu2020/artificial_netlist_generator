@@ -109,5 +109,5 @@ This code is based on OpenROAD project [(link)](https://github.com/The-OpenROAD-
 
 * seonghyeon98@postech.ac.kr
 
-Going to update ANG2.0 soon
+Going to further update soon..
 
