@@ -13,7 +13,6 @@ class dbMTerm;
 };
 
 namespace artnetgen {
-
 class Bin;
 class Net;
 class Node;
@@ -71,15 +70,10 @@ class Node {
     Bin* bin_;
     std::vector<Node*> sources_;
     std::vector<Node*> sinks_;
-    
-   
-    //bool hasIo_;
-
 
   public:
     Node();
     ~Node();
-
     int numFanins() const;
     int numFanouts() const;
     int x() const;
@@ -89,25 +83,22 @@ class Node {
     int ux() const;
     int uy() const;
     int bboxSize() const;
-
-
     bool isPIO() const;
 
     std::vector<Node*> getSinks();
     std::vector<Node*> getSources();
-
-
     odb::dbMaster* getDbMaster();
     //odb::dbMTerm* getDbMTerm(Node* sink);
-
     std::string getTerm(Node* node);
     std::string getName();
     NodeType getType();
     Bin* getBin();
-    void setName(std::string name);
+
+    
     void removeAllSinks();
     void removeAllSources();
-
+    
+    void setName(std::string name);
     void setType(NodeType type);
     void setBin(Bin* bin);
     void setBbox(int lx, int ly, int ux, int uy);
@@ -131,7 +122,6 @@ class Node {
     bool hasConnection(Node* target);
 
     bool hasMultiPortConn();
-
 };
 
 };
