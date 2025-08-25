@@ -57,7 +57,6 @@ Bin::init(int maxFi, int maxFo) {
     fo2Nodes_ = vector<vector<Node*>>(maxFo+1);
 }
 
-
 void
 Bin::addNode(Node* node) {
     int fi = node->numFanins();
@@ -72,44 +71,23 @@ Bin::addNode(Node* node) {
     node->setBin(this);
 }
 
-
 void
-Bin::update(Node* node) {
-    //cout << "update" << endl;    
+Bin::update(Node* node) { 
     vector<Node*> *tarVec;
     vector<Node*>::iterator it;
 
     // map에 저장된 node의 정보를 최신정보로 업데이트.
     if( node->numFanins() != fi_[node] ) {
-//cout << "updated map (" << fi_[node] << " -> " << node->numFanins() << ")" << endl;
-        tarVec = &fi2Nodes_[fi_[node]];
-//int f1 = fi_[node];
-//int n1 = fi2Nodes_[f1].size();
-//int n3 = tarVec->size();
 
+        tarVec = &fi2Nodes_[fi_[node]];
         it = std::find(tarVec->begin(), tarVec->end(), node);
         tarVec->erase(it);
-        
-//cout << "tarVec : " << n3 << "(" << tarVec->size() << ")" <<  endl;
-        
-        //it = std::find(fi2Nodes_[fi_[node]].begin(), fi2Nodes_[fi_[node]].end(), node);
-        //fi2Nodes_[fi_[node]].erase(it); 
         fi_[node] = node->numFanins();
         fi2Nodes_[node->numFanins()].push_back(node);
-//int n2 = fi2Nodes_[f1].size();
-   
-
-        //if(n1!=n2) {
-        //    cout << "######## " << n1 << " " << n2 << endl;
-        //    cout << "fi_[node] : " << fi_[node] << " (" << node->numFanins() << ")" << endl;
-        //    exit(0);
-        //}
-
     }
 
     if( node->numFanouts() != fo_[node] ) {
 
-        //cout << "fo : " << node->numFanouts() << endl;
         tarVec = &fo2Nodes_[fo_[node]];
         it = std::find(tarVec->begin(), tarVec->end(), node);
         tarVec->erase(it);
