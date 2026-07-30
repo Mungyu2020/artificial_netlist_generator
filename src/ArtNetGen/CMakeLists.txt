@@ -49,6 +49,7 @@ target_include_directories( ArtNetGen
   ${OPENDB_HOME}/include
   ${DBSTA_HOME}/include
   ${OPENSTA_HOME}/include
+  ${TCL_INCLUDE_PATH}
 
   ${Boost_INCLUDE_DIR}
  )

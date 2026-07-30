@@ -1,0 +1,87 @@
+FROM ubuntu:18.04
+
+ARG DEBIAN_FRONTEND=noninteractive
+ARG HOST_UID=1000
+ARG HOST_GID=1000
+ARG CMAKE_VERSION=3.20.6
+
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
+
+# Ubuntu 18.04 package repositories
+RUN printf '%s\n' \
+    'deb http://archive.ubuntu.com/ubuntu bionic main restricted universe multiverse' \
+    'deb http://archive.ubuntu.com/ubuntu bionic-updates main restricted universe multiverse' \
+    'deb http://security.ubuntu.com/ubuntu bionic-security main restricted universe multiverse' \
+    > /etc/apt/sources.list
+
+# Build dependencies
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        ca-certificates \
+        wget \
+        git \
+        build-essential \
+        gcc-8 \
+        g++-8 \
+        swig3.0 \
+        tcl-dev \
+        libboost-all-dev \
+        zlib1g-dev \
+        bison \
+        flex \
+        pkg-config \
+        ccache \
+    && rm -rf /var/lib/apt/lists/*
+
+# CMake 3.20.6
+RUN wget -q \
+        "https://cmake.org/files/v3.20/cmake-${CMAKE_VERSION}-linux-x86_64.tar.gz" \
+        -O /tmp/cmake.tar.gz \
+    && tar -xzf /tmp/cmake.tar.gz -C /opt \
+    && rm /tmp/cmake.tar.gz
+
+# Make the requested compiler/SWIG versions the defaults in this image.
+RUN ln -sf /usr/bin/gcc-8 /usr/local/bin/gcc \
+    && ln -sf /usr/bin/g++-8 /usr/local/bin/g++ \
+    && ln -sf /usr/bin/swig3.0 /usr/local/bin/swig
+
+ENV PATH="/opt/cmake-${CMAKE_VERSION}-linux-x86_64/bin:/usr/local/bin:${PATH}"
+ENV CC="/usr/bin/gcc-8"
+ENV CXX="/usr/bin/g++-8"
+ENV CCACHE_DIR="/home/developer/.ccache"
+
+ARG SPDLOG_VERSION=1.8.5
+
+# spdlog required by OpenDB
+RUN git clone \
+        --branch "v${SPDLOG_VERSION}" \
+        --depth 1 \
+        https://github.com/gabime/spdlog.git \
+        /tmp/spdlog \
+    && cmake \
+        -S /tmp/spdlog \
+        -B /tmp/spdlog/build \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DCMAKE_INSTALL_PREFIX=/usr/local \
+        -DSPDLOG_BUILD_EXAMPLE=OFF \
+        -DSPDLOG_BUILD_TESTS=OFF \
+        -DSPDLOG_BUILD_BENCH=OFF \
+    && cmake --build /tmp/spdlog/build -j2 \
+    && cmake --install /tmp/spdlog/build \
+    && rm -rf /tmp/spdlog
+
+# Match container file ownership to the WSL user.
+RUN groupadd --gid "${HOST_GID}" developer \
+    && useradd \
+        --uid "${HOST_UID}" \
+        --gid "${HOST_GID}" \
+        --create-home \
+        --shell /bin/bash \
+        developer \
+    && mkdir -p /workspace /home/developer/.ccache \
+    && chown -R developer:developer /workspace /home/developer
+
+USER developer
+WORKDIR /workspace
+
+CMD ["bash"]
