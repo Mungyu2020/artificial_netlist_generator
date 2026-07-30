@@ -131,7 +131,7 @@ Netlist::distMatching() {
             connect(srcNode, sinkNode);
         }
         curBboxCnt++;
-        if(curBboxCnt % 1000 == 0 || curBboxCnt == tarBboxCnt) { 
+        if(curBboxCnt % 300 == 0 || curBboxCnt == tarBboxCnt) { 
             double progress = 1.0 * curBboxCnt / tarBboxCnt;
             printf("distribution matching progress... [%2.2f\%]\n", 100* progress); 
         }

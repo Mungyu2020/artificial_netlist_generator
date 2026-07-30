@@ -1,7 +1,7 @@
 #include <iostream>
 #include <vector>
 #include <unordered_map>
-
+#include <unordered_set>
 
 namespace odb {
     class dbMaster;
@@ -64,6 +64,7 @@ class Netlist {
     Node* createMergeNode(Node* n1, Node* n2, bool front);
     Node* createMergeNode(Node* n1, Node* n2, Node* n3, bool front);
     void connect(Node* source, Node* sink);
+    void disconnect(Node* source, Node* sink);
     void distMatching();
     void createPrimaryIO();
     void setPrimaryIO();
@@ -71,8 +72,8 @@ class Netlist {
 
     //void checkUnconnected();
     void initialize(); //ArtNetGen* ang);
+    void printNodeTiming(Node* node);
 
-    //
     void timingPathConstruction_v1();
     void timingPathConstruction_v2();
     void insertSequentialNode(Node* target, bool front);
@@ -82,6 +83,10 @@ class Netlist {
 
     Bin* getBin(int x, int y);
     Gain getMaxGain(Bin* srcBin, Bin* sinkBin);
+    Gain getMaxGain_outer(Bin* srcBin, Bin* sinkBin, int fanout);
+    std::vector<Bin*> getSinkBins_outer(Bin* srcBin, int edgeLength, int level, bool shuffle); //MK
+    std::vector<Bin*> getSinkBins_inner(Node* srcNode, Node* sinkNode, bool shuffle); //MK
+    std::vector<Bin*> getSinkBins_v2(Bin* srcBin, int edgeLength, int level, bool shuffle); //MK
     std::vector<Bin*> getSinkBins(Bin* srcBin, int edgeLength, bool shuffle);
     std::unordered_map<Node*, int> topologicalSort();
     int getMaxTopologicalOrder();
@@ -100,6 +105,9 @@ class Netlist {
     Netlist();
     ~Netlist();
 
+    void resolveUnconnectedGraphs(); //MK
+    void dfsDisconnectedComponent(Node* startNode, std::unordered_map<Node*, int> topoOrder, 
+      std::unordered_set<Node*>& globalVisited, std::vector<Node*>& component, bool& hasCycle);
 
     int layoutDimX() { return layoutDimX_; }
     int layoutDimY() { return layoutDimY_; }

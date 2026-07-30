@@ -11,6 +11,10 @@
 #include "opendb/db.h"
 //#include "opendb/dbSet.h"
 
+#include <unordered_set>
+#include <functional>
+
+#include <fstream>
 
 namespace artnetgen {
 using std::cout;
@@ -35,7 +39,7 @@ Netlist::initOnlyUseMasters() {
     fi2SequMasters_ = vector<vector<dbMaster*>>(fiMax+1);
 
     vector<MasterInfo> masters = ang_->getMasterInfo();
-
+    
     for(MasterInfo& info : masters) {
         dbMaster* master = info.master();
         float ratio = info.ratio();
@@ -59,11 +63,8 @@ Netlist::initOnlyUseMasters() {
             fi2CombMasters_[ioCount["input_signal"]].push_back(master);
         }
     }
-
-
-    //
+    
     for(int i=0; i <= fiMax; i++) {
-
         cout << "# of fanins : " << i << endl;
         vector<dbMaster*> masters = fi2SequMasters_[i];
         for(dbMaster* master : masters) //MasterInfo& info : masters) {
@@ -71,15 +72,7 @@ Netlist::initOnlyUseMasters() {
             //dbMaster* master = info.master();
             cout << "   - " << master->getName() << endl;
         }
-
-
-
     }
-
-
-  
-
-
 }
 
 
@@ -90,117 +83,20 @@ Netlist::technologyMapping() {
     vector<vector<Node*>> fi2CombNodes(fiMax+1);
     vector<vector<Node*>> fi2SequNodes(fiMax+1);
 
-    //vector<vector<dbMaster*>> fi2CombMasters(fiMax+1);
-    //vector<vector<dbMaster*>> fi2SequMasters(fiMax+1);
-   
-    //unordered_map<std::string, float> master2ratio;
-
-
     for(Node* node : nodes_) {
         if(node->getType() == NodeType::Combinational)
             fi2CombNodes[node->numFanins()].push_back(node);
         else if(node->getType() == NodeType::Sequential)
             fi2SequNodes[node->numFanins()].push_back(node);
-        //fi2Nodes[node->numFanins()].push_back(node);
     }
-
-    /*    
-    vector<MasterInfo> masters = ang_->getMasterInfo();
-
-    for(MasterInfo& info : masters) {
-        dbMaster* master = info.master();
-        float ratio = info.ratio();
-
-
-        master2ratio[master->getName()] = ratio;
-
-        dbSet<dbMTerm> terms = master->getMTerms();
-        
-        int inSigCnt = 0;
-        int inClkCnt = 0;
-        int inRstCnt = 0;
-        int inScanCnt = 0;
-        int outSigCnt = 0;
-        int outClkCnt = 0;
-        int outRstCnt = 0;
-        int outScanCnt = 0;
-
-        for(auto it = terms.begin(); it != terms.end(); it++) {
-
-            string termName = it->getName();
-
-            dbSigType sigType = it->getSigType();
-            dbIoType ioType = it->getIoType();
-
-            if(sigType.getValue() == dbSigType::SIGNAL) {
-                if(ioType.getValue() == dbIoType::INPUT) {
-                    inSigCnt++;
-                } else if(ioType.getValue() == dbIoType::OUTPUT) {
-                    outSigCnt++;
-                }
-                //cout << termName << " " << sigType.getString() << " " << ioType.getString() << endl;
-            } else if(sigType.getValue() == dbSigType::CLOCK) {
-                if(ioType.getValue() == dbIoType::INPUT) {
-                    inClkCnt++;
-                } else if(ioType.getValue() == dbIoType::OUTPUT) {
-                    outClkCnt++;
-                }
-            } else if(sigType.getValue() == dbSigType::RESET) {
-                if(ioType.getValue() == dbIoType::INPUT) {
-                    inRstCnt++;
-                } else if(ioType.getValue() == dbIoType::OUTPUT) {
-                    outRstCnt++;
-                }
-            } else if(sigType.getValue() == dbSigType::SCAN) {
-                 if(ioType.getValue() == dbIoType::INPUT) {
-                    inScanCnt++;
-                } else if(ioType.getValue() == dbIoType::OUTPUT) {
-                    outScanCnt++;
-                }               
-            } else {
-
-            }
-        }
-        //cout << master->getName() << " " 
-        //     << inSigCnt << " " << outSigCnt << " " << inClkCnt << " " << outClkCnt << " " 
-        //     << inRstCnt << " " << outRstCnt << " " << inScanCnt << " " << outScanCnt << endl;
-
-        if(outSigCnt == 0)
-            continue;
-        
-        if(inScanCnt > 0) {
-            cout << "current version does not support scan-chain cell... (" << master->getName() << ")" <<  endl;
-            continue;
-        }
-
-        if(inClkCnt > 0) {
-            // sequential cell
-            fi2SequMasters[inSigCnt].push_back(master);       
-        } else {
-            // combinational cell
-            fi2CombMasters[inSigCnt].push_back(master);
-        }
-    }
-    */
-    
-    // Control in
-    //int clkIdx = nodeStor_.size();
-    //int rstIdx = clkIdx+1;
 
     Node* clkIn = new Node();
     Node* rstIn = new Node();
     nodes_.push_back(clkIn);
     nodes_.push_back(rstIn);
-    //nodeStor_.push_back(Node());
-    //nodeStor_.push_back(Node());
-    //nodes_.push_back(&nodeStor_[clkIdx]);
-    //nodes_.push_back(&nodeStor_[rstIdx]);
-    //Node* clkIn = nodes_[clkIdx];
-    //Node* rstIn = nodes_[rstIdx];
 
     primIns_.push_back(clkIn);
     primIns_.push_back(rstIn);
-
 
     clkIn->setName("clk");
     clkIn->setType(NodeType::ClockIn);
@@ -209,10 +105,8 @@ Netlist::technologyMapping() {
     rstIn->setType(NodeType::ResetIn);
     rstIn->setBin(getBin(0,0)); 
 
-
     // Nangate Lef --> CLOCK 포트에대한 정의가 없음.
-    // clock port이름을 input argument로 받고 
-    // dbMTerm::getName() 과 비교하여 sequential MACRO를 찾아야 할듯. 
+    // clock port이름을 input argument로 받고 dbMTerm::getName() 과 비교하여 sequential MACRO를 찾아야 할듯. 
     // 혹은 lef파일 PIN-USE --> clock 추가
     int totNodeCnt=0;
     int beginIdx = 0;
@@ -220,18 +114,17 @@ Netlist::technologyMapping() {
     float denominator;
 
     for(int fi = 0; fi <= fiMax; fi++) {
+        cout << "# of inputs == " << fi << endl;
+        // <Sequential>
         denominator = 0.0;
         totNodeCnt = fi2SequNodes[fi].size();
         beginIdx = 0;
 
         unordered_map<dbMaster*, int> targetCnt;
         unordered_map<dbMaster*, int> currentCnt;
-
-
+        
         for(dbMaster* master : fi2SequMasters_[fi]) {
-            //denominator += master2ratio[master->getName()];
             denominator += master2ratio_[master];
-            
             // ONLY_USE AT LEAST ONCE!
             //Node* target = fi2SequNodes[fi][beginIdx];
             //target->setDbMaster(master);
@@ -240,26 +133,17 @@ Netlist::technologyMapping() {
             //    break;
         }
 
-
         for(dbMaster* master : fi2SequMasters_[fi]) {
-            //master2ratio[master->getName()] /= denominator;
             master2ratio_[master] /= denominator;
-            //float ratio = master2ratio[master->getName()];
             float ratio = master2ratio_[master];
             //cout << "   " << master->getName() << " " << 100 * master2ratio_[master] << "\%" << endl;
             targetCnt[master] = ceil(ratio * totNodeCnt);
             currentCnt[master] = 0;
-            //endIdx = beginIdx + ceil(ratio * totNodeCnt);
-            //endIdx = min(endIdx, totNodeCnt);
-            //for(int i=beginIdx; i < endIdx; i++) {
-            //    Node* target = fi2SequNodes[fi][i];
-            //    target->setDbMaster(master);
-            //}
-            //beginIdx = endIdx;
         }
 
         int numNodes = fi2SequNodes[fi].size();
         int numMasters = fi2SequMasters_[fi].size();
+
         int idxIter = 0;
 
         for(int i=0; i < numNodes; i++) {
@@ -268,43 +152,28 @@ Netlist::technologyMapping() {
             
             while(true) {
                 master = fi2SequMasters_[fi][idxIter];
-                idxIter = (idxIter+1) % numMasters;
+                idxIter = (idxIter + 1) % numMasters;
                 if(targetCnt[master] - currentCnt[master] > 0) {
                     currentCnt[master]++;
                     break;
                 }
-                //if(targetCnt[master] > 0) {
-                //    targetCnt[master]--;
-                //    break;
-                //}
             }
             target->setDbMaster(master);
         }
         
-        // log
-        cout << "# of inputs == " << fi << endl;
         cout << "<Sequantial>" << endl;
         for(dbMaster* master : fi2SequMasters_[fi]) {
-            //printf("    %2.2f (%d / %d) - %s\n", master2ratio_[master], currentCnt[master], targetCnt[master], master->getName());
             printf("    %2.2f (%d/%d) - ", master2ratio_[master], currentCnt[master], targetCnt[master]);
-            cout << master->getName() << endl; //, name);
+            cout << master->getName() << endl;
         }
 
-
-
-        //cout << "<Combinational>" << endl;
+        // <Combinational> 
         denominator = 0.0;
         totNodeCnt = fi2CombNodes[fi].size();
         beginIdx = 0;
         targetCnt.clear();
-        numNodes = fi2CombNodes[fi].size();
-        numMasters = fi2CombMasters_[fi].size();
-        idxIter = 0;
-
-
 
         for(dbMaster* master : fi2CombMasters_[fi]) {
-            //denominator += master2ratio[master->getName()];
             denominator += master2ratio_[master];
             // ONLY_USE AT LEAST ONCE!
             //Node* target = fi2CombNodes[fi][beginIdx];
@@ -314,21 +183,22 @@ Netlist::technologyMapping() {
             //    break;
         }
 
-
         for(dbMaster* master : fi2CombMasters_[fi]) {
             master2ratio_[master] /= denominator;
             float ratio = master2ratio_[master];
             //cout << "   " << master->getName() << " " << 100 * master2ratio_[master] << "\%" << endl;
             targetCnt[master] = ceil(ratio * totNodeCnt);
             currentCnt[master] = 0;
-            //endIdx = beginIdx + ceil(ratio * totNodeCnt);
-            //endIdx = min(endIdx, totNodeCnt);
-            //for(int i=beginIdx; i < endIdx; i++) {
-            //    Node* target = fi2CombNodes[fi][i];
-            //    target->setDbMaster(master);
-            //}
-            //beginIdx = endIdx;
         }
+        /*
+        for (fi = 0 ; fi < fiDist_.xMax() ;fi++){
+            cout << "fi2CombNodes["<<fi<<"].size(): "<<fi2CombNodes[fi].size()<<endl;
+            cout << "fi2CombMasters_["<<fi<<"].size(): "<<fi2CombMasters_[fi].size()<<endl;
+        }exit(0);
+        */
+        numNodes = fi2CombNodes[fi].size();
+        numMasters = fi2CombMasters_[fi].size();
+        idxIter = 0;
 
         for(int i=0; i < numNodes; i++) {
             Node* target = fi2CombNodes[fi][i];
@@ -336,10 +206,7 @@ Netlist::technologyMapping() {
             while(true) {
                 master = fi2CombMasters_[fi][idxIter];
                 idxIter = (idxIter+1) % numMasters;
-                //if(targetCnt[master] > 0) {
-                //    targetCnt[master]--;
-                //    break;
-                //}
+  
                 if(targetCnt[master] - currentCnt[master] > 0) {
                     currentCnt[master]++;
                     break;
@@ -356,17 +223,14 @@ Netlist::technologyMapping() {
         }
     }
 
-
-    for(Node* node : nodes_) { 
-        node->mappingTerms(clkIn, rstIn); 
-    }
-    ///////////////////
+    for(Node* node : nodes_) {node->mappingTerms(clkIn, rstIn);}
+    
     int netCnt=0;
-    nets_.reserve(2* ang_->getInstanceCnt());
+    nets_.reserve(2 * ang_->getInstanceCnt());
     unordered_map<string, Net> name2net;
     unordered_map<string, string> out2name;
     
-    for(int i=0; i < nodes_.size(); i++) {
+    for(int i = 0; i < nodes_.size(); i++) {
         Node* source = nodes_[i];
         unordered_map<string, vector<Node*>> out2sinks;
 
@@ -383,7 +247,7 @@ Netlist::technologyMapping() {
 
             if( source->getType() == NodeType::PrimaryIn || 
                 source->getType() == NodeType::ClockIn ||
-                source->getType() == NodeType::ResetIn ) {
+                source->getType() == NodeType::ResetIn) {
                 netName = source->getName();
             } else {
                 bool containPrimOut = false;
@@ -394,11 +258,8 @@ Netlist::technologyMapping() {
                         containPrimOut = true;
                     }
                 }
-
-                if(!containPrimOut)
-                    netCnt++;
+                if(!containPrimOut) {netCnt++;}   
             }
-
             out2name[outTermName] = netName;
 
             if(name2net.find(netName) == name2net.end()) {
@@ -406,139 +267,91 @@ Netlist::technologyMapping() {
                 name2net[netName].setName(netName);
                 name2net[netName].addTerm(source, outTermName);
             }
-
             for(Node* sink : sinks) {
                 string inTermName = sink->getTerm(source);
                 name2net[netName].addTerm(sink, inTermName);
             }
-        
         }
-
-
         for(auto p : out2sinks) {
             string outTermName = p.first;
             string netName = out2name[outTermName];
             vector<Node*> sinks = p.second;
         }
-
-        /*
-        for(Node* sink : source->getSinks()) {
-            string outTermName = source->getTerm(sink);
-            string inTermName = sink->getTerm(source);
-            
-            if(out2net.find(outTermName) == out2net.end()) {
-                switch(source->getType()) {
-                    case NodeType::PrimaryIn:
-                        out2net[outTermName] = source->getName(); break;
-                        //netName = source->getName();
-                    case NodeType::ResetIn:
-                        out2net[outTermName] = source->getName(); break;
-                        //netName = source->getName();
-                    case NodeType::ClockIn:
-                        out2net[outTermName] = source->getName(); break; //netName = source->getName();
-                    default:
-                        out2net[outTermName] = "net"+to_string(netCnt++); break;
-                        //netName = "net"+to_string(netCnt++);
-                }
-            }
-
-            netName = out2net[outTermName];
-
-            if(src2net.find(netName) == src2net.end()) {
-                src2net[netName] = Net();
-                src2net[netName].setName(netName);
-                src2net[netName].addTerm( source, outTermName );
-            }
-
-            Net* net = &src2net[netName];
-            net->addTerm( sink, inTermName );
-        }
-        */
     }
-
     for(auto it = name2net.begin(); it != name2net.end(); it++) {
         netStor_.push_back(it->second);
-        //nets_.push_back(&netStor_.back());
-        Net* net = &netStor_.back(); //&it->second;
-        //net->print();
+        Net* net = &netStor_.back(); 
     }
-
-    cout << "technology mapping is finished" << endl;
-
-
-
-
-
     for(int i=0; i < netStor_.size(); i++) {
         Net* net = &netStor_[i];
         nets_.push_back(net);
-        //nets_[i]->print();
     }
-        //netStor_[i].print(); //nets_[i]->print();
-    //for(Net* net : nets_)
-    //    net->print();
-
-
-    /*
-    for(int i=0; i < nodes_.size(); i++) {
-        Node* node = nodes_[i];
-
-        if(node->getType() == NodeType::PrimaryIn || node->getType() == NodeType::PrimaryOut)
-            continue;
-
-        
-        dbMaster* master = node2master[node];
-
-        cout << i << "-th node is mapped to " << master->getName() << endl;
-
-    }
-    */
+    cout << "technology mapping is finished" << endl;
 }
 
-
 int Netlist::getMaxTopologicalOrder() {
-//cout << "1" << endl;
     int maxTopoOrder = 0;
     unordered_map<Node*, int> topoOrder = topologicalSort();
-//cout << "2" << endl;
-    for(Node* node : nodes_) {
-        maxTopoOrder = max(maxTopoOrder, topoOrder[node]);
-    }
-//cout << "3" << endl;
+    for(Node* node : nodes_) {maxTopoOrder = max(maxTopoOrder, topoOrder[node]);}
     return maxTopoOrder;
 }
 
 double Netlist::getAvgTopologicalOrder() {
     double avgTopoOrder = 0;
     unordered_map<Node*, int> topoOrder = topologicalSort();
-    for(Node* node : nodes_) {
-        avgTopoOrder += topoOrder[node];
-    }
+    for(Node* node : nodes_) {avgTopoOrder += topoOrder[node];}
     avgTopoOrder /= nodes_.size();
     return avgTopoOrder;
 }
 
-
 unordered_map<Node*, int> Netlist::topologicalSort() {
+    const int MAX_FO = foDist_.xMax();
+    for (Node* dstNode : nodes_) {
+        if (dstNode->numFanins() == 0 && dstNode->getType() == NodeType::Combinational) {
+            Bin* dstBin = dstNode->getBin();
+            const std::vector<int>& dstPath = dstBin->getPath();
+    
+            Node* bestSrc = nullptr;
+            int maxCommonPrefix = -1;
+
+            for (Node* srcNode : nodes_) {
+                if (srcNode->numFanouts() >= MAX_FO) continue;
+                if (srcNode == dstNode) continue;
+    
+                Bin* srcBin = srcNode->getBin();
+                const std::vector<int>& srcPath = srcBin->getPath();
+    
+                int commonLen = 0;
+                while (commonLen < srcPath.size() && commonLen < dstPath.size() &&
+                       srcPath[commonLen] == dstPath[commonLen]) {
+                    commonLen++;
+                }
+    
+                if (commonLen > maxCommonPrefix) {
+                    maxCommonPrefix = commonLen;
+                    bestSrc = srcNode;
+                }
+            }
+            if (bestSrc) { connect(bestSrc, dstNode);}    
+            else {cout << "[ERROR] No suitable source found for comb node with fanin == 0 " << endl; exit(0);}
+        }
+    }
 
     queue<Node*> Q;
-
     unordered_map<Node*, int> inDegree;
     unordered_map<Node*, int> topoOrder;
 
-    for(int i=0; i < nodes_.size(); i++) {
+    for(int i = 0; i < nodes_.size(); i++) {
         Node* node = nodes_[i];
-        
-        topoOrder[node] = -1; //.insert(make_pair(node, -1));
+        topoOrder[node] = -1;
 
         switch(node->getType()) {
             case NodeType::Sequential:
-                inDegree[node] = 0; break; //.insert(make_pair(node, 0)); break;
+                inDegree[node] = 0; break;
             case NodeType::PrimaryIn:
-                inDegree[node] = 0; break; //inDegree.insert(make_pair(node, 0)); break;
+                inDegree[node] = 0; break;
             default:
                 inDegree[node] = node->numFanins(); break; 
-                //inDegree.insert(make_pair(node, node->numFanins())); break;
         }
 
         if(inDegree[node] == 0) {
@@ -550,39 +363,27 @@ unordered_map<Node*, int> Netlist::topologicalSort() {
     }
 
     while(!Q.empty()) {
-        Node* n1 = Q.front();
-        Q.pop();
-
-        if(n1->getType() == NodeType::ClockIn || n1->getType() == NodeType::ResetIn)
-        {
-            cout << "???????" << endl;
-            exit(0);
-        }
-
-
+        Node* n1 = Q.front(); Q.pop();
+        // Exception
+        if(n1->getType() == NodeType::ClockIn || n1->getType() == NodeType::ResetIn) { cout << "???????" << endl; exit(0);}
         for(Node* n2 : n1->getSinks()) {
-
             if( inDegree[n2] == 0 ) continue;
-
             if( --inDegree[n2] == 0 ) {
                 topoOrder[n2] = topoOrder[n1] + 1;
                 Q.push(n2);
             }
         }
     }
-
+ 
     return topoOrder;
 }
 
 int
 Netlist::getCountNodeType(int type) {
     int count =0;
-    for(Node* node : nodes_)
-        if(node->getType() == type) count++;
-
+    for(Node* node : nodes_) {if(node->getType() == type) count++;}
     return count;
 }
-
 
 double
 Netlist::getCombinationalRatio() {
@@ -595,13 +396,9 @@ Netlist::getCombinationalRatio() {
         else if(node->getType() == NodeType::Combinational)
             numCombNodes++;
     }
-
     double currentRatio = 1.0 * numCombNodes / (numSequNodes + numCombNodes);
-
     return currentRatio;
 }
-
-
 
 void
 Netlist::timingPathConstruction_v1() {
@@ -610,13 +407,11 @@ Netlist::timingPathConstruction_v1() {
     double avgGateDelay = ang_->getAvgGateDelay();
     double avgTopoOrder = ang_->getAvgTopoOrder();
 
-
     int targetMaxOrder = ceil(avgTopoOrder) + 2; //ceil( synClkPeriod / avgGateDelay );
     //cout << "timing path construction (target clk : " << synClkPeriod << " avg. gate delay : " << avgGateDelay << ")" << endl;
     cout << "timing path construction (target avg. topo. order : " << avgTopoOrder << ")" << endl;
 
     int numIter = 0;
-
     while(true) {
         unordered_map<Node*, int> topoOrder = topologicalSort();
         bool updated = false;
@@ -628,18 +423,24 @@ Netlist::timingPathConstruction_v1() {
                 }
             }
         }
-  
-    
+        // MK
+        /*
+        int i=0;
+        for(Node* n : nodes_){
+            if(topoOrder[n] != -1){
+                i++;
+                cout<<topoOrder[n]<<endl;
+            }
+        }cout<<"i: "<<i<<endl; */
+        
         if(numIter++ % 5 == 0) {
-            cout << numIter++ << "-iteration target " << avgTopoOrder << " cur_avg " << getAvgTopologicalOrder() << " cur_max " << getMaxTopologicalOrder() << endl;
+            cout << numIter++ << "-iteration target " << avgTopoOrder;
+            cout << " cur_avg " << getAvgTopologicalOrder();
+            cout << " cur_max " << getMaxTopologicalOrder() << endl;
         }
-
-        if(!updated)
-            break;
+        if(!updated) break;
     }
 
-
-    // TODO 
     // fit to comb_ratio (input arg)
     int numTotNodes = nodes_.size();
     int numCombNodes = 0;
@@ -647,44 +448,35 @@ Netlist::timingPathConstruction_v1() {
     vector<vector<Node*>> targets(layoutDimX_ * layoutDimY_);
     vector<int> idx;
 
-    for(int i=0; i < layoutDimX_ * layoutDimY_; i++)
-        idx.push_back(i);
-
+    for(int i=0; i < layoutDimX_ * layoutDimY_; i++) {idx.push_back(i);}
     for(Node* node : nodes_) {
         if(node->getType() == NodeType::Sequential) {
-            int x = node->x();
-            int y = node->y();
-            int id = x + y * layoutDimX_;
+            int id = node->x() + node->y() * layoutDimX_;
             targets[id].push_back(node);
             numSequNodes++;
         } else if (node->getType() == NodeType::Combinational) {
             numCombNodes++;
         }
-
     }
     
-
-
     double currentRatio = 1.0 * numCombNodes / (numCombNodes + numSequNodes);
-    
     cout << "Target combination ratio   : " << ang_->getCombRatio() << endl;
     cout << "Current combination ratio  : " << currentRatio << endl;
     cout << "Current max topo order     : " << getMaxTopologicalOrder() << endl;
     cout << "Current avg topo order     : " << getAvgTopologicalOrder() << endl;
+
     int edgeLength = 0;
     bool finish = false;
-
-
-    //for(int edgeLength=0; edgeLength < layoutDimX_+layoutDimY_; edgeLength++) {
-    //for(int edgeLength=0; edgeLength < 3; edgeLength++) {
     int maxLen = ceil(0.2 * (layoutDimX_ + layoutDimY_));
     cout << "Max len : " << maxLen << endl;
-    for(int edgeLength=0; edgeLength < max(3, maxLen); edgeLength++) {
-
-        if(currentRatio >= ang_->getCombRatio())
-            break;
+    // 2단계: Sequential 노드를 2개씩 골라서 → 1개의 Combinational로 merge
+    // 병합 기준은 fanin/fanout 수가 너무 많지 않은 노드끼리
+    for(int edgeLength = 0; edgeLength < max(3, maxLen); edgeLength++) {
+        if(currentRatio >= ang_->getCombRatio()) {break;}
         random_shuffle(idx.begin(), idx.end());
         for(int id : idx) {
+            // edgeLength는 탐색 범위 반경 (맨해튼 거리 기준)
+            // lx, ly, ux, uy는 탐색할 사각형 영역의 좌표 범위
             int cx = id % layoutDimX_;
             int cy = id / layoutDimX_;
             int lx = max(cx - edgeLength, 0);
@@ -692,45 +484,39 @@ Netlist::timingPathConstruction_v1() {
             int ux = min(cx + edgeLength, layoutDimX_-1);
             int uy = min(cy + edgeLength, layoutDimY_-1);
 
+            // 탐색 영역 내에 Sequential node들을 병합 후보로 선택
+            // targets[tIdx]: tIdx에 해당하는 bin에 있는 sequential node들의 vector
             vector<Node*> candidates;
-
-            for(int x=lx; x<=ux; x++) {
-                for(int y=ly; y<=uy; y++) {
-                    int tIdx = x + y*layoutDimX_;
+            for(int x = lx; x <= ux; x++) {
+                for(int y = ly; y <= uy; y++) {
+                    int tIdx = x + y * layoutDimX_;
                     candidates.insert(candidates.end(), targets[tIdx].begin(), targets[tIdx].end());
                 }
             }
 
-
-            
             if(candidates.size() < 2)
                 continue;
             else {
-                //sort(candidates.begin(), candidates.end(), [](Node* left, Node* right) {
-                //    return left->numFanouts() < right->numFanouts();
-                //        });
-                sort(candidates.begin(), candidates.end(), [](Node* left, Node* right) {
-                    return left->numFanins() < right->numFanins();
-                        });
+                // 후보들을 fanin 개수가 적은 순으로 정렬
+                sort(candidates.begin(), candidates.end(), [](Node* left, Node* right) {return left->numFanins() < right->numFanins();});
 
-
-                bool found=false;
+                bool found = false;
                 Node *n1, *n2;
-
-                for(int i=0; i < candidates.size()-1; i++) {
+                for(int i=0; i < candidates.size() - 1; i++) {
                     n1 = candidates[i];
-                    n2 = candidates[i+1];
+                    n2 = candidates[i + 1];
                     int totFanins = n1->numFanins() + n2->numFanins();
                     int totFanouts = n1->numFanouts() + n2->numFanouts();
-
+                    // (총 fanin 수 ≤ 최대 fanin 제한) && (총 fanout 수 < 최대 fanout 제한) 이면 병합 가능
                     if(totFanins <= fiDist_.xMax() && totFanouts < foDist_.xMax()) {
                         found=true;
                         break;
                     } 
                 }
-
                 if(!found) continue;
 
+                // 병합 가능한 쌍을 찾았으면, createMergeNode()를 통해 새로운 combinational 노드 n3 생성
+                // 기존 n1, n2는 comb 노드로 재설정됨
                 Node* n3 = createMergeNode(n1, n2, true);
                 n1->setType(NodeType::Combinational);
                 n2->setType(NodeType::Combinational);
@@ -742,22 +528,16 @@ Netlist::timingPathConstruction_v1() {
                 targets[idx2].erase(find(targets[idx2].begin(), targets[idx2].end(), n2));
                 targets[idx3].push_back(n3);
 
-                //numTotNodes++;
                 numCombNodes += 2;
                 numSequNodes -= 1; 
-                //currentRatio = 1.0 * (numTotNodes - numSequNodes) / numTotNodes;
-                //currentRatio = 1.0 * numCombNodes / (numCombNodes + numSequNodes);
                 currentRatio = 1.0 * (numCombNodes+numSequNodes) / (numCombNodes + 2*numSequNodes); 
-                //cout << "current ratio : " << currentRatio << "(" << getCombinationalRatio() << ")" << endl;
             }
-
-            if(currentRatio >= ang_->getCombRatio())
-                break;
+            if(currentRatio >= ang_->getCombRatio()) { break; }
         }
-
-
     }
 
+    // 3단계: 1단계로 만족 못했을 경우, fanout 기준으로 병합 재시도
+    // 위와 똑같은 merge 작업인데 이번엔 fanout이 적은 순서로 sorting해서 시도함
     for(int edgeLength=0; edgeLength < max(3, maxLen); edgeLength++) {
 
         if(currentRatio >= ang_->getCombRatio())
@@ -831,17 +611,14 @@ Netlist::timingPathConstruction_v1() {
     cout << "Current max topo order     : " << getMaxTopologicalOrder() << endl;
     cout << "Current comb_ratio : " << currentRatio << " (" << ang_->getCombRatio() << ")" << endl;
     cout << getCombinationalRatio() << endl;
-
     cout << "#comb : " << getCountNodeType(NodeType::Combinational) << endl;
     cout << "#sequ : " << getCountNodeType(NodeType::Sequential) << endl;
-
-    for(int i=0; i < nodes_.size(); i++) {
+    
+    // 4단계: Sequential 노드 중 사용할 수 없는 master가 할당된 경우 제거
+    int len = nodes_.size();
+    for(int i=0; i < len; i++) {
         Node* node = nodes_[i];
         if(node->getType() == NodeType::Sequential) {
-            //if(node->numFanins() > 1) {
-            //    node->setType(NodeType::Combinational);
-            //    insertSequentialNode(node, false);
-            //}
             if(!hasMaster(node->numFanins(), true)) {
                 node->setType(NodeType::Combinational);
                 insertSequentialNode(node, false);
@@ -851,26 +628,17 @@ Netlist::timingPathConstruction_v1() {
 
     numCombNodes = 0;
     numSequNodes = 0;
-
     for(Node* node : nodes_) {
-        if(node->getType() == NodeType::Sequential)
-            numSequNodes++;
-        else if(node->getType() == NodeType::Combinational)
-            numCombNodes++;
+        if(node->getType() == NodeType::Sequential) {numSequNodes++;}
+        else if(node->getType() == NodeType::Combinational) {numCombNodes++;}
     }
-
     currentRatio = 1.0 * numCombNodes / (numSequNodes + numCombNodes);
-
     cout << "Current comb_ratio : " << currentRatio << " (" << ang_->getCombRatio() << ")" << endl;
     cout << getCombinationalRatio() << endl;
     cout << "#comb : " << getCountNodeType(NodeType::Combinational) << endl;
     cout << "#sequ : " << getCountNodeType(NodeType::Sequential) << endl;
     cout << "Max topological order : " << getMaxTopologicalOrder() << " (target max order -> " << targetMaxOrder << ")" << endl;
-
 }
-
-
-
 
 void
 Netlist::timingPathConstruction_v2() {
@@ -1057,109 +825,6 @@ Netlist::timingPathConstruction_v2() {
         }
     }
 
-
-
-    //for(int edgeLength=0; edgeLength < layoutDimX_+layoutDimY_; edgeLength++) {
-    //for(int edgeLength=0; edgeLength < 3; edgeLength++) {
-    //for(int edgeLength=0; edgeLength < max(3, maxLen); edgeLength++) {
-
-    //    if(currentRatio >= ang_->getCombRatio())
-    //        break;
-    //    
-    //    random_shuffle(idx.begin(), idx.end());
-    //    for(int id : idx) {
-    //        int cx = id % layoutDimX_;
-    //        int cy = id / layoutDimX_;
-    //        int lx = max(cx - edgeLength, 0);
-    //        int ly = max(cy - edgeLength, 0);
-    //        int ux = min(cx + edgeLength, layoutDimX_-1);
-    //        int uy = min(cy + edgeLength, layoutDimY_-1);
-    //        vector<Node*> candidates;
-    //        for(int x=lx; x<=ux; x++) {
-    //            for(int y=ly; y<=uy; y++) {
-    //                int tIdx = x + y*layoutDimX_;
-    //                candidates.insert(candidates.end(), targets[tIdx].begin(), targets[tIdx].end());
-    //            }
-    //        }
-    //        if(candidates.size() < 2)
-    //            continue;
-    //        else {
-    //            sort(candidates.begin(), candidates.end(), [](Node* left, Node* right) {
-    //                return left->numFanouts() < right->numFanouts();
-    //                    });
-    //            bool insertFront =false;
-    //            Node* n1 = candidates[0];
-    //            Node* n2 = candidates[1];
-    //            Node* n3 = candidates[2];
-    //            int totFanins = n1->numFanins() + n2->numFanins() + n3->numFanins();
-    //            int totFanouts = n1->numFanouts() + n2->numFanouts() + n3->numFanouts();
-    //            if(totFanins <= fiDist_.xMax()) {
-    //                insertFront = true;
-    //            } else if(totFanouts <= foDist_.xMax()) {
-    //                insertFront = false;
-    //            } else {
-    //                continue;
-    //            }
-    //            Node* n3 = createMergeNode(n1, n2, insertFront);
-    //            bool found=false;
-    //            Node *n1, *n2, *n3;
-
-    //            for(int i=0; i < candidates.size()-1; i++) {
-    //                n1 = candidates[i];
-    //                n2 = candidates[i+1];
-    //                int totFanouts = n1->numFanouts() + n2->numFanouts();
-    //                if(totFanouts < foDist_.xMax()) {
-    //                    found=true;
-    //                }
-    //                break;
-    //            }
-    //           
-    //            if(found) {
-    //                Node* n3 = createMergeNode(n1, n2, false);
-    //                n1->setType(NodeType::Combinational);
-    //                n2->setType(NodeType::Combinational);
-
-    //                int idx1 = n1->x() + n1->y() * layoutDimX_;
-    //                int idx2 = n2->x() + n2->y() * layoutDimX_;
-    //                int idx3 = n3->x() + n3->y() * layoutDimX_;
-    //                targets[idx1].erase(find(targets[idx1].begin(), targets[idx1].end(), n1));
-    //                targets[idx2].erase(find(targets[idx2].begin(), targets[idx2].end(), n2));
-    //                targets[idx3].push_back(n3);
-
-    //                numCombNodes += 2;
-    //                numSequNodes -= 1;
-    //                //currentRatio = 1.0 * numCombNodes / (numCombNodes + numSequNodes); //(numTotNodes - numSequNodes) / numTotNodes;
-    //                currentRatio = 1.0 * (numCombNodes+numSequNodes) / (numCombNodes + 2*numSequNodes); 
-    //                //cout << "current ratio : " << currentRatio << endl;
-    //                //cout << "current ratio : " << currentRatio << "(" << getCombinationalRatio() << ")" << endl;
-    //            } 
-    //        }
-    //        if(currentRatio >= ang_->getCombRatio())
-    //            break;
-    //    }
-    //    if(currentRatio >= ang_->getCombRatio())
-    //        break;
-    //}
-
-
-    /*
-    while(true) {
-        unordered_map<Node*, int> topoOrder = topologicalSort();
-        bool updated = false;
-        for(Node* n : nodes_) {
-            if(topoOrder[n] == targetMaxOrder) {
-                if(n->getType() == NodeType::Combinational) {
-                    n->setType(NodeType::Sequential);
-                    updated = true;
-                }
-            }
-        }
-   
-        if(!updated)
-            break;
-    }
-    */
-
     cout << "Current max topo order     : " << getMaxTopologicalOrder() << endl;
     cout << "Current comb_ratio : " << currentRatio << " (" << ang_->getCombRatio() << ")" << endl;
     cout << getCombinationalRatio() << endl;
@@ -1200,83 +865,8 @@ Netlist::timingPathConstruction_v2() {
     cout << getCombinationalRatio() << endl;
     cout << "#comb : " << getCountNodeType(NodeType::Combinational) << endl;
     cout << "#sequ : " << getCountNodeType(NodeType::Sequential) << endl;
-    //for(Node* node : nodes_) {
-    //for(auto& candidates : targets) {
-    //    for(Node* node : candidates) {
-    //        if(node->getType() == NodeType::Sequential) {
-    //            if(node->numFanins() > 1) {
-    //                node->setType(NodeType::Combinational);
-    //                insertSequentialNode(node, false);
-    //            }
-    //        }
-    //    }
-    //}
-
-
-
-    //for(auto& candidates : targets) {
-    //    for(Node* target: candidates) {
-    //        target->setType(NodeType::Combinational);
-    //        insertSequentialNode(target, false);
-    //    }
-    //}
-
-
     cout << "Max topological order : " << getMaxTopologicalOrder() << " (target max order -> " << targetMaxOrder << ")" << endl;
 
-
-    /*
-
-    while(currentRatio < ang_->getCombRatio()) {
-
-        int minDist = INT_MAX;
-        Node *n1, *n2, *n3;
-        for(int i=0; i < targets.size()-1; i++) {
-            Node* candi1 = targets[i];
-            for(int j=i+1; j < targets.size(); j++) {
-                Node* candi2 = targets[j];
-
-                int totFanouts = candi1->numFanouts() + candi2->numFanouts();
-
-                if(totFanouts > foDist_.xMax())
-                    continue;
-
-                int curDist = abs(candi1->x() - candi2->x()) + abs(candi1->y() - candi2->y());
-                
-
-
-                if(minDist > curDist) {
-                    minDist = curDist;
-                    n1 = candi1;
-                    n2 = candi2;
-                }
-            }
-        }
-
-
-        //Node* n1 = targets[0];
-        //Node* n2 = targets[1];
-        n3 = createMergeNode(n1, n2);
-        n1->setType(NodeType::Combinational);
-        n2->setType(NodeType::Combinational);
-
-
-        targets.erase(find(targets.begin(), targets.end(), n1));
-        targets.erase(find(targets.begin(), targets.end(), n2));
-
-        targets.push_back(n3);
-        currentRatio = 1.0 * (nodes_.size() - targets.size()) / nodes_.size();
-
-    }
-
-    // TODO
-    // insert flipflops
-
-    for(Node* target : targets) {
-        target->setType(NodeType::Combinational);
-        insertSequentialNode(target, false);
-    }
-    */
 }
 
 
@@ -1292,20 +882,15 @@ Node* Netlist::createMergeNode(Node* n1, Node* n2, bool front) {
 
     string cellName = "merge" + to_string(nodes_.size());
     
-
     Node* n3 = new Node();
     nodes_.push_back(n3);
-    //nodeStor_.push_back(Node());
-    //nodes_.push_back(&nodeStor_.back());
-    //Node* n3 = nodes_.back();
+
     n3->setType(NodeType::Sequential);
     n3->setBin(n1->getBin());
-    
     int lx = min(n1->lx(), n2->lx());
     int ly = min(n1->ly(), n2->ly());
     int ux = max(n1->ux(), n2->ux());
     int uy = max(n1->uy(), n2->uy());
-
     n3->setBbox(lx, ly, ux, uy);
     n3->setName(cellName);
     n3->getBin()->addNode(n3);
@@ -1320,14 +905,12 @@ Node* Netlist::createMergeNode(Node* n1, Node* n2, bool front) {
                 sources.push_back(node);
             }
         }
-
         for(Node* node: n2->getSources()) {
             it = find(sources.begin(), sources.end(), node);
             if(it == sources.end()) {
                 sources.push_back(node);
             }
         }
-
 
         n3->addSources(sources);
         n3->addSink(n1);
@@ -1346,7 +929,6 @@ Node* Netlist::createMergeNode(Node* n1, Node* n2, bool front) {
             it = find(sinks.begin(), sinks.end(), node);
             if(it == sinks.end()) {
                 sinks.push_back(node);
-                //node->addSource(n3);
             }
         }
 
@@ -1354,7 +936,6 @@ Node* Netlist::createMergeNode(Node* n1, Node* n2, bool front) {
             it = find(sinks.begin(), sinks.end(), node);
             if(it == sinks.end()) {
                 sinks.push_back(node);
-                //node->addSource(n3);
             }
         }
 
@@ -1461,7 +1042,6 @@ Node* Netlist::createMergeNode(Node* n1, Node* n2, Node* n3, bool front) {
             }
         }
 
-
         n4->addSinks(sinks);
         n4->addSource(n1);
         n4->addSource(n2);
@@ -1531,11 +1111,4 @@ Netlist::insertSequentialNode(Node* target, bool front) {
     seqn->getBin()->update(seqn);
     target->getBin()->update(target);
 }
-
-
-
-
-
 };
-
-

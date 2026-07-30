@@ -12,7 +12,6 @@
 #include "opendb/db.h"
 #include <chrono> //mk
 #include <omp.h> //mk
-#include <tuple>
 
 namespace artnetgen {
 using std::cout;
@@ -29,60 +28,44 @@ using std::ceil;
 using std::to_string;
 
 using namespace odb;
-/* VERSION 1
-1. Determine bbox of each net from Bbox dist.
-2. get a sample k from Fanout dist. -> Determine # of candidate sink
-3. Phase1: determine outer edge 
-        - determine src-sink pair usign fanoutGain(fo, fo+k) faninGain(fi, fi+1) bboxGain( bbox1, bbox2 )
-        - in this stage, faninGain & bboxGain are determined 
-   Phase2: determine inner edge
-        - there are k-1 edges left, and source node is determined
-        - cand. sinks are located in the bbox area -> limit search space
-        - calculate faninGain(fi, fi+1) for each cand. sink. And select top k-1 cand. 
-*/
-/* VERSION 2
-1. get a sample k from Fanout dist. -> Determine # of candidate sink
-2. get k samples S from edge dist.
-3. Phase1: determine outer edge
-        - determine src-sink pair usign fanoutGain(fo, fo+k) faninGain(fi, fi+1) bboxGain( bbox1, bbox2 )
-        - in this stage, faninGain & bboxGain are determined 
-   Phase2: determine inner edge
-        - there are k-1 edges left, and source node is determined
-        - cand. sinks are located in the bbox area -> limit search space
-        - for each k-1 sample, determine sink using faninGain(fi, fi+1)
-*/
+
 void
 Netlist::distMatching() {
     using Clock = std::chrono::system_clock;
     using Duration = std::chrono::duration<double>;
     auto distStart = Clock::now();
+    double totalSinkBinTime = 0.0;
+    double totalMaxGainTime = 0.0;
 
-
-    int tarBboxCnt = bboxDist_.totalCnt();
-    int curBboxCnt = 0;
+    int tarEdgeCnt = edgeDist_.totalCnt();
+    int curEdgeCnt = 0;
 
     vector<Bin*> srcBins = bins_;
-    // Coonect a net for each loop
-    while ( tarBboxCnt > curBboxCnt ){
-        // 1. Determine bbox of each net from Bbox dist.
-        int bboxOfNet = bboxDist_.sample();
-        // 2. get a sample k(fanout) from Fanout dist. -> Determine # of candidate sink
-        int fanout = foDist_.sample();
+    vector<int> edgeSampling = edgeDist_.getSamplingVector();
 
-        // 3. Phase1: determine outer edge
-        //  - determine a src-sink pair usign fanoutGain(fo, fo+k) faninGain(fi, fi+1) bboxGain( bbox1, bbox2 )
-        //  - in this stage, faninGain & bboxGain are determined
+    cout << "Total # of edges to create : " << tarEdgeCnt << endl;
+    while ( tarEdgeCnt > curEdgeCnt ) {
+        int rIdx = rand() % edgeSampling.size();
+        int edgeLength = edgeSampling[rIdx];
+
         Gain maxG(-INT_MAX, nullptr, nullptr);
+
         std::random_shuffle(srcBins.begin(), srcBins.end());
         // Iterate source-sink bins (distance(source, sink) == edgeLength)
         for (Bin* srcBin : srcBins) {
+            auto t0 = Clock::now();
             vector<Bin*> sinkBins;
             for (int level = 1; level <= srcBin->getPath().size(); level++) {
-                sinkBins = getSinkBins_outer(srcBin, bboxOfNet, level, true);
+                sinkBins = getSinkBins_v2(srcBin, edgeLength, level, true);
                 if (!sinkBins.empty()) break;
             }
+            auto t1 = Clock::now();
+            totalSinkBinTime += Duration(t1 - t0).count();
             for(Bin* sinkBin : sinkBins) {
-                Gain localMaxG = getMaxGain_outer(srcBin, sinkBin, fanout);
+                auto t2 = Clock::now();
+                Gain localMaxG = getMaxGain(srcBin, sinkBin);
+                auto t3 = Clock::now();
+                totalMaxGainTime += Duration(t3 - t2).count();
                 if(maxG.value() < localMaxG.value()) {maxG = localMaxG;}
             }
         }
@@ -91,61 +74,26 @@ Netlist::distMatching() {
             Node* srcNode = maxG.n1();
             Node* sinkNode = maxG.n2();
             connect(srcNode, sinkNode);
-        }
-
-        //3. Phase2: determine inner edge
-        //  - there are k-1 edges left, and source node is determined
-        //  - cand. sinks are located in the bbox area -> limit search space
-        //  - for each k-1 sample, determine sink using faninGain(fi, fi+1)
-        Node* srcNode = maxG.n1();
-        Node* sinkNode_outer = maxG.n2();
-        vector<Bin*> sinkBins;
-        sinkBins = getSinkBins_inner(srcNode, sinkNode_outer, true);
-
-        std::vector<std::tuple<Node*, double>> nodeGainList;
-        for(Bin* sinkBin : sinkBins) {
-            for(int fi = 0; fi < fiDist_.xMax(); fi++) {
-                vector<Node*> candiSinks = sinkBin->fi2Nodes(fi);
-                if(candiSinks.size() == 0) continue;
-                double fiG = faninGain(fi, fi+1);
-                for(Node* candiSink : candiSinks) {
-                    if(candiSink->getType() == NodeType::PrimaryIn) {continue;} 
-                    else if((candiSink->getType() == NodeType::PrimaryOut) && candiSink->numFanins() >= 1) {continue;} 
-                    else if( candiSink <= srcNode || srcNode->hasConnection(candiSink) ) {continue;}
-                    nodeGainList.push_back(std::make_tuple(candiSink, fiG));
-                }
+            curEdgeCnt++;
+            if(curEdgeCnt % 1000 == 0 || curEdgeCnt == tarEdgeCnt) { 
+                double progress = 1.0 * curEdgeCnt / tarEdgeCnt;
+                printf("distribution matching progress... [%2.2f\%]\n", 100* progress); 
             }
         }
-        std::sort(nodeGainList.begin(), nodeGainList.end(),
-            [](const std::tuple<Node*, double>& a, const std::tuple<Node*, double>& b) {
-                return std::get<1>(a) > std::get<1>(b);
-            });
-        std::vector<Node*> candidateSinkNode;
-        int k = fanout - 1;
-        for (int i = 0; i < std::min(k, (int)nodeGainList.size()); ++i) {
-            Node* sinkNode = std::get<0>(nodeGainList[i]);
-            candidateSinkNode.push_back(sinkNode);
-        }
-        // 3. connect 호출
-        for (Node* sinkNode : candidateSinkNode) {
-            connect(srcNode, sinkNode);
-        }
-        curBboxCnt++;
-        if(curBboxCnt % 1000 == 0 || curBboxCnt == tarBboxCnt) { 
-            double progress = 1.0 * curBboxCnt / tarBboxCnt;
-            printf("distribution matching progress... [%2.2f\%]\n", 100* progress); 
-        }
     }
-
     auto distEnd = Clock::now();
     Duration totalRuntime = distEnd - distStart;
+
     std::cout << "[TIME] distMatching total     : " << totalRuntime.count()    << " sec\n";
+    std::cout << "[TIME] getSinkBins total time : " << totalSinkBinTime        << " sec\n";
+    std::cout << "[TIME] getMaxGain total time  : " << totalMaxGainTime        << " sec\n";
+    std::cout << "[TIME] other overhead         : " << (totalRuntime.count() - totalSinkBinTime - totalMaxGainTime) << " sec\n";
     print();
     exit(0);
 }
 
 // Source Bin과 Sink Bin에 속한 Node중 가장 큰 Gain을 가지는 Node쌍을 반환
-Gain Netlist::getMaxGain_outer(Bin* srcBin, Bin* sinkBin, int fanout) {
+Gain Netlist::getMaxGain(Bin* srcBin, Bin* sinkBin) {
     double maxG = -INT_MAX;
     Node *srcNode, *sinkNode;
 
@@ -159,8 +107,7 @@ Gain Netlist::getMaxGain_outer(Bin* srcBin, Bin* sinkBin, int fanout) {
         if(candiSrcs.size() == 0) {continue;}
 
         // GAIN2 : Fanout
-        if(fo + fanout > foDist_.xMax()) {continue;}
-        double foG = fanoutGain(fo, fo+fanout);
+        double foG = fanoutGain(fo, fo+1);
         
         // srcBin에 속한 node중 sinkBin과 연결됬을때, netBbox gain이 가장큰 src node를 반환
         std::random_shuffle(candiSrcs.begin(), candiSrcs.end());
@@ -192,8 +139,9 @@ Gain Netlist::getMaxGain_outer(Bin* srcBin, Bin* sinkBin, int fanout) {
             if(candiSinks.size() == 0) continue;
 
             // GAIN4: Fanout
-            double fiG = faninGain(fi, fi+fanout);
+            double fiG = faninGain(fi, fi+1);
             
+            //double totG = 1.0 * fiG + 1.0 * foG + 1.0 * bboxG + 1.0 * moduleG;
             double totG = 1.0 * fiG + 1.0 * foG + 1.0 * bboxG;
 
             if( totG > maxG ) {
@@ -217,9 +165,8 @@ Gain Netlist::getMaxGain_outer(Bin* srcBin, Bin* sinkBin, int fanout) {
     return Gain(maxG, srcNode, sinkNode);
 }
 
-
 // 현재 Source Bin과 Distance가 edgeLength인 sinkBin 리스트를 반환
-vector<Bin*> Netlist::getSinkBins_outer(Bin* srcBin, int edgeLength, int level, bool shuffle) {
+vector<Bin*> Netlist::getSinkBins_v2(Bin* srcBin, int edgeLength, int level, bool shuffle) {
     vector<Bin*> sinkBins;
     const vector<int>& srcPath = srcBin->getPath();
 
@@ -244,30 +191,6 @@ vector<Bin*> Netlist::getSinkBins_outer(Bin* srcBin, int edgeLength, int level, 
 }
 
 
-vector<Bin*> Netlist::getSinkBins_inner(Node* srcNode, Node* sinkNode, bool shuffle) {
-    vector<Bin*> sinkBins;
-    int x1 = srcNode->getBin()->x(), y1 = srcNode->getBin()->y();
-    int x2 = sinkNode->getBin()->x(), y2 = sinkNode->getBin()->y();
-
-
-    int minX = std::min(x1, x2);
-    int maxX = std::max(x1, x2);
-    int minY = std::min(y1, y2);
-    int maxY = std::max(y1, y2);
-    
-    for (int x = minX; x <= maxX; ++x) {
-        for (int y = minY; y <= maxY; ++y) {
-            Bin* sinkBin = getBin(x, y);
-            sinkBins.push_back(sinkBin);
-        }
-    }
-
-    if( shuffle && sinkBins.size() > 1 )
-        std::random_shuffle(sinkBins.begin(), sinkBins.end());
-
-    return sinkBins;
-}
-
 // Bbox gain function
 double Netlist::bboxGain(int bbox1, int bbox2) {
     double currErr = 1.0 * abs(bboxDist_.delta(bbox1)) + 1.0 * abs(bboxDist_.delta(bbox2));
@@ -281,8 +204,7 @@ double Netlist::fanoutGain(int fo1, int fo2) {
     double currErr = 1.0 * abs(foDist_.delta(fo1)) + 1.0 * abs(foDist_.delta(fo2));
     double nextErr = 1.0 * abs(foDist_.delta(fo1)-1) + 1.0 * abs(foDist_.delta(fo2)+1);
     double deltaErr = currErr - nextErr;
-    //double reward = (fo1 == 0) ? 16 : 0; 
-    double reward = 0;
+    double reward = (fo1 == 0) ? 16 : 0; 
     double g = deltaErr + reward;
     return g;
 }
@@ -292,8 +214,7 @@ double Netlist::faninGain(int fi1, int fi2) {
     double currErr = 1.0 * abs(fiDist_.delta(fi1)) + 1.0 * abs(fiDist_.delta(fi2));
     double nextErr = 1.0 * abs(fiDist_.delta(fi1)-1) + 1.0 * abs(fiDist_.delta(fi2)+1);
     double deltaErr = currErr - nextErr;
-    //double reward = (fi1 == 0) ? 16 : 0; 
-    double reward = 0;
+    double reward = (fi1 == 0) ? 16 : 0; 
     double g = deltaErr + reward;
     return g;
 }
